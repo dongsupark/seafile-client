@@ -637,6 +637,51 @@ QString mimeTypeFromFileName(const QString& fileName)
     return types_map->value(suffix);
 }
 
+QString readableNameForFolder()
+{
+    return QObject::tr("Folder");
+}
+
+QString readableNameForFile(const QString& fileName)
+{
+    QString mimetype = mimeTypeFromFileName(fileName);
+
+    if (mimetype.isEmpty()) {
+        return QObject::tr("Document");
+    }
+
+    if (mimetype == "application/pdf") {
+        return QObject::tr("PDF Document");
+    } else if (mimetype.startsWith("image")) {
+        return QObject::tr("Image File");
+    } else if (mimetype.startsWith("text")) {
+        return QObject::tr("Text Document");
+    } else if (mimetype.startsWith("audio")) {
+        return QObject::tr("Audio File");
+    } else if (mimetype.startsWith("video")) {
+        return QObject::tr("Video File");
+    } else if (mimetype.contains("msword") || mimetype.contains("ms-word")) {
+        return QObject::tr("Word Document");
+    } else if (mimetype.contains("mspowerpoint") || mimetype.contains("ms-powerpoint")) {
+        return QObject::tr("PowerPoint Document");
+    } else if (mimetype.contains("msexcel") || mimetype.contains("ms-excel")) {
+        return QObject::tr("Excel Document");
+    } else if (mimetype.contains("openxmlformats-officedocument")) {
+        // see http://stackoverflow.com/questions/4212861/what-is-a-correct-mime-type-for-docx-pptx-etc
+        if (mimetype.contains("wordprocessingml")) {
+            return QObject::tr("Word Document");
+        } else if (mimetype.contains("spreadsheetml")) {
+            return QObject::tr("Excel Document");
+        } else if (mimetype.contains("presentationml")) {
+            return QObject::tr("PowerPoint Document");
+        }
+        // } else if (mimetype.contains("application")) {
+        //     return "binary";
+    }
+
+    return QObject::tr("Document");
+}
+
 QString getIconByFileName(const QString& fileName)
 {
     QString icon = iconNameFromFileName(fileName);
