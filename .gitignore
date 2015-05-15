@@ -30,6 +30,7 @@ cscope*
 core
 *.pyc
 .DS_Store
+compile_commands.json
 
 # CMake files goes here
 build/
