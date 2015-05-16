@@ -9,6 +9,7 @@ IF (APPLE OR NOT UNIX)
 ENDIF()
 
 option(BUILD_ENABLE_WARNINGS "Enable compiler warnings." ON)
+SET(NAUTILUS_EXTENSION_DIR CACHE "Path to Nautilus Extenstion Directory" "")
 
 if(BUILD_ENABLE_WARNINGS)
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pedantic -Wall -Wextra -Wsign-compare -Wno-long-long -Wno-unused-parameter")
@@ -73,7 +74,28 @@ TARGET_LINK_LIBRARIES(nautilus-seafile
   ${LIBSEARPC_LIBRARIES}
   ${LIBSEAFILE_LIBRARIES})
 
+## Find libnautilus-extension's directory
+IF ("${NAUTILUS_EXTENSION_DIR}" STREQUAL "")
+  EXECUTE_PROCESS(
+    COMMAND ${PKG_CONFIG_EXECUTABLE} --variable=extensiondir libnautilus-extension
+    OUTPUT_VARIABLE PKGCONFIG_RESULT
+    RESULT_VARIABLE PKGCONFIG_FAILURE)
+
+  IF (PKGCONFIG_FAILURE)
+    SET(NAUTILUS_EXTENSION_DIR "lib/nautilus/extension-1.0")
+  ELSE()
+    STRING(REGEX REPLACE "[\r\n]" " " PKGCONFIG_RESULT "${PKGCONFIG_RESULT}")
+    STRING(REGEX REPLACE " +$"    ""  PKGCONFIG_RESULT "${PKGCONFIG_RESULT}")
+
+    SET(NAUTILUS_EXTENSION_DIR ${PKGCONFIG_RESULT})
+  ENDIF()
+ENDIF()
+
 INSTALL(DIRECTORY
   ${CMAKE_CURRENT_SOURCE_DIR}/hicolor
   DESTINATION share/icons
-)
+  )
+
+INSTALL(TARGETS nautilus-seafile
+  DESTINATION ${NAUTILUS_EXTENSION_DIR}
+  )
