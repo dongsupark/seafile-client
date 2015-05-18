@@ -6,6 +6,7 @@
 #include "account.h"
 
 #include "seafile-applet.h"
+#include "repo-service.h"
 #include "rpc/rpc-client.h"
 #include "utils/utils.h"
 #include "utils/api-utils.h"
@@ -733,10 +734,11 @@ void FileSearchRequest::requestSuccess(QNetworkReply& reply)
         if (map.empty())
             continue;
         tmp.repo_id = map["repo_id"].toString();
+        tmp.repo_name = RepoService::instance()->getRepo(tmp.repo_id).name;
         tmp.name = map["name"].toString();
         tmp.oid = map["oid"].toString();
         tmp.last_modified = map["last_modified"].toInt();
-        tmp.full_path = map["full_path"].toString();
+        tmp.fullpath = map["fullpath"].toString();
         tmp.size = map["size"].toInt();
         retval.push_back(tmp);
     }
