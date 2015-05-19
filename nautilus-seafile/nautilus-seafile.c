@@ -14,6 +14,7 @@ static guint kUpdateFileStatusInterval = 2 * 1000;
 static void start_autoconnect_rpc_client ();
 static GObject* find_repo (const char* path);
 static gboolean update_file_status_by_file (SearpcClient *client, NautilusFileInfo *file);
+static void clean_up_single_file (gpointer data, GObject *obj);
 static void clean_up_all_data ();
 
 static GList *watch_set_ = NULL;
@@ -41,7 +42,7 @@ static GList *seafile_extension_get_columns(NautilusColumnProvider *provider)
                                   "SeafileExtension::sync_status",
                                   "Sync Status",
                                   "Sync Status Description");
-    ret = g_list_append(NULL, column);
+    ret = g_list_append (NULL, column);
 
     return ret;
 }
@@ -82,6 +83,8 @@ static NautilusOperationResult seafile_extension_update_file_info (NautilusInfoP
     }
     /* we can change it to a asynchronize way if we want? */
     update_file_status_by_file (client, file);
+
+	g_object_weak_ref (G_OBJECT (file), clean_up_single_file, NULL);
 
     g_free (filename);
     g_free (uri);
@@ -138,17 +141,17 @@ void
 seafile_extension_register_type (GTypeModule *module)
 {
     static const GTypeInfo info = {
-                    sizeof (SeafileExtensionClass),
-                    (GBaseInitFunc) NULL,
-                    (GBaseFinalizeFunc) NULL,
-                    (GClassInitFunc) seafile_extension_class_init,
-                    NULL,
-                    NULL,
-                    sizeof (SeafileExtension),
-                    0,
-                    (GInstanceInitFunc) seafile_extension_instance_init,
-                    NULL
-            };
+         sizeof (SeafileExtensionClass),
+         (GBaseInitFunc) NULL,
+         (GBaseFinalizeFunc) NULL,
+         (GClassInitFunc) seafile_extension_class_init,
+         NULL,
+         NULL,
+         sizeof (SeafileExtension),
+         0,
+         (GInstanceInitFunc) seafile_extension_instance_init,
+         NULL
+    };
 
     static const GInterfaceInfo menu_provider_iface_info = {
         (GInterfaceInitFunc) seafile_extension_menu_provider_iface_init,
@@ -404,11 +407,11 @@ static gboolean update_file_status (gpointer data)
 static __inline const char* get_path_status_from_state(const char *state)
 {
     int len = strlen (state);
-#define COMPARE_EQUAL(x) (strncmp (state, x, len) == 0)
+#define COMPARE_EQUAL(x) (strncmp (state, (x), len) == 0)
     if (COMPARE_EQUAL("disabled"))
         return "unknown"; /* SYNC_STATE_DISABLED */
     else if (COMPARE_EQUAL("relay not connected") || COMPARE_EQUAL("waiting for sync") || COMPARE_EQUAL("relay authenticating"))
-        return "synced"; /* SYNC_STATE_WAITING */
+        return "syncing"; /* SYNC_STATE_WAITING */
     else if (COMPARE_EQUAL("initializing") || COMPARE_EQUAL("cancel pending"))
         return "synced"; /* SYNC_STATE_INIT */
     else if (COMPARE_EQUAL("downloading") || COMPARE_EQUAL("uploading") || COMPARE_EQUAL("merging"))
@@ -527,9 +530,25 @@ static GObject* find_repo (const char* path)
         }
         g_free (worktree);
 
-        head = g_list_next(head);
+        head = head->next;
     }
     return head ? head->data : NULL;
+}
+
+static void clean_up_single_file (gpointer data, GObject *obj)
+{
+    NautilusFileInfo *file = (NautilusFileInfo*) obj;
+    char *uri, *filename;
+    uri = nautilus_file_info_get_uri (file);
+    filename = g_filename_from_uri (uri, NULL, NULL);
+    if (!filename)
+    {
+        g_free (uri);
+        return;
+    }
+    g_hash_table_remove (file_status_, filename);
+    g_free (uri);
+    g_free (filename);
 }
 
 static void clean_up_all_data ()
