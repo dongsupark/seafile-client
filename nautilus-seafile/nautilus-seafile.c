@@ -63,6 +63,7 @@ static NautilusOperationResult seafile_extension_update_file_info (NautilusInfoP
     client = seafile_rpc_get_instance ();
     g_return_val_if_fail (client, NAUTILUS_OPERATION_COMPLETE);
     g_return_val_if_fail (file, NAUTILUS_OPERATION_FAILED);
+    g_return_val_if_fail (!nautilus_file_info_is_gone (file), NAUTILUS_OPERATION_COMPLETE);
 
     uri = nautilus_file_info_get_uri (file);
     filename = g_filename_from_uri (uri, NULL, NULL);
@@ -294,11 +295,7 @@ static __inline void set_nautilus_file_info (NautilusFileInfo *file, const char 
     {
         nautilus_file_info_invalidate_extension_info (file);
     }
-    if (strlen(status) == 0)
-    {
-        nautilus_file_info_add_emblem (file, "");
-    }
-    else
+    if (strlen(status) != 0)
     {
         char* emblem_name = g_strconcat ("seafile-", status, NULL);
         nautilus_file_info_add_emblem (file, emblem_name);
