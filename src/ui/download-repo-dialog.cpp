@@ -27,7 +27,8 @@ bool isPathConflictWithExistingRepo(const QString &path, QString *repo_name) {
     RepoService::instance()->refreshLocalRepoList();
     const std::vector<LocalRepo> & repos = RepoService::instance()->localRepos();
     for (unsigned i = 0; i < repos.size(); ++i) {
-        if (repos[i].worktree == path) {
+        // compare case insensitive file names as well
+        if (QFileInfo(repos[i].worktree) == QFileInfo(path)) {
             *repo_name = repos[i].name;
             return true;
         }
