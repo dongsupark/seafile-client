@@ -10,6 +10,7 @@
 #include <jansson.h>
 
 #include "account-mgr.h"
+#include "settings-mgr.h"
 #include "utils/utils.h"
 #include "seafile-applet.h"
 #include "rpc/rpc-client.h"
@@ -21,6 +22,7 @@
 #include "download-repo-dialog.h"
 
 namespace {
+const int kAlternativeTryTimes = 20;
 bool isPathConflictWithExistingRepo(const QString &path, QString *repo_name) {
     RepoService::instance()->refreshLocalRepoList();
     const std::vector<LocalRepo> & repos = RepoService::instance()->localRepos();
@@ -32,6 +34,19 @@ bool isPathConflictWithExistingRepo(const QString &path, QString *repo_name) {
     }
     return false;
 }
+QString getAlternativePath(const QString &dir_path, const QString &name) {
+    QDir dir = QDir(dir_path);
+    QFileInfo file;
+    file = QFileInfo(dir.filePath(name));
+    int i;
+    for (i = 1; i < kAlternativeTryTimes; ++i) {
+        if (!file.exists() && dir.mkdir(file.fileName()))
+            return file.absoluteFilePath();
+        file = QFileInfo(dir.filePath(name + " (" + QString::number(i) + ")"));
+    }
+
+    return QString();
+}
 } // anonymous namespace
 
 DownloadRepoDialog::DownloadRepoDialog(const Account& account,
@@ -41,6 +56,7 @@ DownloadRepoDialog::DownloadRepoDialog(const Account& account,
       repo_(repo),
       account_(account)
 {
+    auto_mode_ = !seafApplet->settingsManager()->isEnableSyncingWithExistingFolder();
     setupUi(this);
     if (!repo.isSubfolder()) {
         setWindowTitle(tr("Sync library \"%1\"").arg(repo_.name));
@@ -55,7 +71,6 @@ DownloadRepoDialog::DownloadRepoDialog(const Account& account,
     mRepoIcon->setPixmap(repo.getPixmap());
     mRepoName->setText(repo_.name);
     mOperationText->setText(tr("Sync to folder:"));
-    mMergeHint->setText(tr("If a sub-folder with same name exists, its contents will be merged."));
 
     if (repo_.encrypted) {
         mPassword->setVisible(true);
@@ -79,8 +94,55 @@ DownloadRepoDialog::DownloadRepoDialog(const Account& account,
 
     setDirectoryText(seafApplet->configurator()->worktreeDir());
 
+    if (auto_mode_) {
+        mMergeHint->setText(tr("If a sub-folder with same name exists, its contents will be merged."));
+
+        mSwitchToSyncFrame->hide();
+    } else {
+        sync_with_existing_ = false;
+        connect(mSwitchModeHint, SIGNAL(linkActivated(const QString &)),
+                this, SLOT(switchMode()));
+        updateSyncMode();
+
+        mMergeHint->hide();
+    }
+
     connect(mChooseDirBtn, SIGNAL(clicked()), this, SLOT(chooseDirAction()));
     connect(mOkBtn, SIGNAL(clicked()), this, SLOT(onOkBtnClicked()));
+}
+
+void DownloadRepoDialog::switchMode()
+{
+    sync_with_existing_ = !sync_with_existing_;
+
+    updateSyncMode();
+}
+
+void DownloadRepoDialog::updateSyncMode()
+{
+    QString switch_hint_text;
+    QString op_text;
+    const QString link_template = "<a style=\"color:#FF9A2A\" href=\"#\">%1</a>";
+
+    QString OR = tr("or");
+    if (!sync_with_existing_) {
+        QString link = link_template.arg(tr("sync with an existing folder"));
+        switch_hint_text = QString("%1 %2").arg(OR).arg(link);
+
+        op_text = tr("Create a new sync folder at:");
+    } else {
+        QString link = link_template.arg(tr("create a new sync folder"));
+        switch_hint_text = QString("%1 %2").arg(OR).arg(link);
+
+        op_text = tr("Sync with this existing folder:");
+
+        if (!alternative_path_.isNull()) {
+            setDirectoryText(alternative_path_);
+        }
+    }
+
+    mOperationText->setText(op_text);
+    mSwitchModeHint->setText(switch_hint_text);
 }
 
 void DownloadRepoDialog::setDirectoryText(const QString& path)
@@ -91,6 +153,10 @@ void DownloadRepoDialog::setDirectoryText(const QString& path)
     }
 
     mDirectory->setText(text);
+
+    if (!auto_mode_ && sync_with_existing_) {
+        alternative_path_ = text;
+    }
 }
 
 void DownloadRepoDialog::chooseDirAction()
@@ -123,7 +189,38 @@ void DownloadRepoDialog::onOkBtnClicked()
 
 bool DownloadRepoDialog::validateInputs()
 {
-    QString password;
+    if (auto_mode_) {
+        return validateInputsAutoMode();
+    }
+
+    setDirectoryText(mDirectory->text().trimmed());
+    if (mDirectory->text().isEmpty()) {
+        QMessageBox::warning(this, getBrand(),
+                             tr("Please choose the folder to sync"),
+                             QMessageBox::Ok);
+        return false;
+    }
+    QDir dir(mDirectory->text());
+    if (!dir.exists()) {
+        QMessageBox::warning(this, getBrand(),
+                             tr("The folder does not exist"),
+                             QMessageBox::Ok);
+        return false;
+    }
+    if (repo_.encrypted) {
+        mPassword->setText(mPassword->text().trimmed());
+        if (mPassword->text().isEmpty()) {
+            QMessageBox::warning(this, getBrand(),
+                                 tr("Please enter the password"),
+                                 QMessageBox::Ok);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool DownloadRepoDialog::validateInputsAutoMode()
+{
     setDirectoryText(mDirectory->text().trimmed());
     if (mDirectory->text().isEmpty()) {
         QMessageBox::warning(this, getBrand(),
@@ -132,6 +229,7 @@ bool DownloadRepoDialog::validateInputs()
         return false;
     }
     sync_with_existing_ = false;
+    alternative_path_ = QString();
     QString path = QDir(mDirectory->text()).absoluteFilePath(repo_.name);
     QFileInfo fileinfo = QFileInfo(path);
     if (fileinfo.exists()) {
@@ -153,10 +251,20 @@ bool DownloadRepoDialog::validateInputs()
         sync_with_existing_ = true;
         int ret = QMessageBox::question(
             this, getBrand(), tr("Are you sure to sync with the existing folder \"%1\"?")
-                                  .arg(path),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        if (ret & QMessageBox::No)
+                                  .arg(path) + QString("<br/><small>%1</small>").arg(tr("Click No to sync with a new folder instead")),
+            QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::Yes);
+        if (ret & QMessageBox::Cancel)
             return false;
+        if (ret & QMessageBox::No) {
+            QString new_path = getAlternativePath(mDirectory->text(), repo_.name);
+            if (new_path.isEmpty()) {
+                QMessageBox::warning(this, getBrand(),
+                                     tr("Unable to find a alternative folder name").arg(path),
+                                     QMessageBox::Ok);
+                return false;
+            }
+            alternative_path_ = new_path;
+        }
     }
     if (repo_.encrypted) {
         mPassword->setText(mPassword->text().trimmed());
@@ -167,8 +275,6 @@ bool DownloadRepoDialog::validateInputs()
             return false;
         }
     }
-
-    password = mPassword->text();
     return true;
 }
 
@@ -188,7 +294,11 @@ void DownloadRepoDialog::onDownloadRepoRequestSuccess(const RepoDownloadInfo& in
     QString error;
 
     if (sync_with_existing_) {
-        worktree = QDir(worktree).absoluteFilePath(repo_.name);
+        if (alternative_path_.isEmpty())
+            worktree = QDir(worktree).absoluteFilePath(repo_.name);
+        else
+            worktree = alternative_path_;
+        fprintf(stderr, "merging with %s\n", worktree.toUtf8().data());
         ret = seafApplet->rpcClient()->cloneRepo(info.repo_id, info.repo_version,
                                                  info.relay_id,
                                                  repo_.name, worktree,
@@ -199,6 +309,7 @@ void DownloadRepoDialog::onDownloadRepoRequestSuccess(const RepoDownloadInfo& in
                                                  info.more_info,
                                                  &error);
     } else {
+        fprintf(stderr, "download to %s\n", worktree.toUtf8().data());
         ret = seafApplet->rpcClient()->downloadRepo(info.repo_id, info.repo_version,
                                                     info.relay_id,
                                                     repo_.name, worktree,

@@ -25,17 +25,22 @@ private slots:
     void chooseDirAction();
     void onDownloadRepoRequestSuccess(const RepoDownloadInfo& info);
     void onDownloadRepoRequestFailed(const ApiError& error);
+    void switchMode();
 
 private:
     Q_DISABLE_COPY(DownloadRepoDialog);
 
     bool validateInputs();
+    bool validateInputsAutoMode();
     void setAllInputsEnabled(bool enabled);
     void setDirectoryText(const QString& path);
+    void updateSyncMode();
 
     ServerRepo repo_;
 
+    bool auto_mode_;
     bool sync_with_existing_;
+    QString alternative_path_;
 
     Account account_;
 };
